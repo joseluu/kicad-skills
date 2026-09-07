@@ -9,13 +9,13 @@ Directives de mise en page valables pour **tous** les projets KiCad de cette
 machine. Le fichier `.kicad_sch` est la base de donnees primaire : on le modifie
 directement via les outils `mcp__kicad__*`, jamais par un script generateur.
 
-Deux parties : les **5 directives de mise en page**, puis les **regles
+Deux parties : les **6 directives de mise en page**, puis les **regles
 d'orientation des etiquettes**, qui sont la source d'erreur la plus frequente et
 la moins visible.
 
 ---
 
-## Les 5 directives de mise en page
+## Les 6 directives de mise en page
 
 ### 1. GND independants
 
@@ -81,6 +81,16 @@ l'interieur d'un bloc.
 blocs on relie par **etiquettes**. Un lecteur voit alors les blocs d'un coup
 d'oeil.
 
+**Piege frequent :** deux composants voisins d'un meme sous-bloc (ex. une
+resistance de terminaison et son cavalier de selection) relies par une paire
+d'etiquettes de meme nom au lieu d'un fil. Quand les deux broches sont a
+quelques mm l'une de l'autre, les deux etiquettes (plus les champs
+Reference/Value des deux composants) se retrouvent empilees dans un espace
+etroit et se chevauchent presque toujours. Des que deux pins portant le meme
+nom de net sont visuellement proches, preferer `add_schematic_wire` entre les
+deux — ca supprime les deux etiquettes d'un coup et resout la surcharge a la
+racine plutot qu'en jouant sur les decalages de texte.
+
 ### 5. Pas de chevauchement entre symboles
 
 Les corps de deux symboles ne doivent jamais se superposer, meme partiellement.
@@ -90,6 +100,30 @@ un point, c'est acceptable. Tout vrai recouvrement est une erreur.
 **Cas typique :** un transistor et sa diode de protection places sur le meme
 centre. Deplacer le second a cote, cabler par fils courts horizontaux ou
 verticaux.
+
+### 6. Labels locaux sur un schema qui tient sur une seule page
+
+Sur un projet **sans hierarchie multi-feuilles** (tout le schema tient sur une
+seule feuille `.kicad_sch`), utiliser des **etiquettes locales** (`label`,
+sans cadre) pour tout, y compris les rails d'alimentation (`GND`, `+5V`,
+`+12V`, `+19V`...). Ne pas utiliser `global_label` (pentagone) par defaut.
+
+**Pourquoi :** `global_label` sert a propager un nom **entre plusieurs
+feuilles** d'un projet hierarchique — c'est sa seule difference electrique
+avec `label`. Sur une feuille unique, `label` relie deja tous les points de
+meme nom entre eux ; le pentagone n'ajoute aucune connectivite, seulement un
+signal visuel qui laisse croire a tort que le projet est multi-feuilles et
+alourdit chaque etiquette (le pentagone est visuellement plus charge qu'un
+simple texte).
+
+**Reserver `global_label`** aux projets reellement hierarchiques (plusieurs
+`.kicad_sch` relies par des sheet symbols), ou a un point d'entree/sortie
+explicitement destine a etre reutilise dans un autre projet.
+
+**Si le projet passe un jour au multi-feuilles**, reconvertir alors les rails
+en `global_label` (`(label "` -> `(global_label "` par simple substitution de
+texte, la position/angle/justify ne changent pas) — ne pas anticiper cette
+conversion sur un schema qui tient sur une page.
 
 ---
 
@@ -184,6 +218,41 @@ exactement ce qu'on veut. C'est l'inverse des etiquettes de net. Les symboles
 KiCad de base arrivent souvent avec un `(justify left)` sur leur `Value` : il
 faut le retirer, sinon le texte deborde du rectangle.
 
+### Symboles triangulaires (comparateurs, amplis-op, portes)
+
+Le triangle est plus large pres de sa **base** (cote entrees) et se referme
+vers la **pointe** (cote sortie) : le texte ne tient que pres de la base, et
+uniquement s'il n'y a pas deja un pictogramme (bulle d'inversion, hysteresis
+Schmitt...) a cet endroit.
+
+**Reference et Value a l'interieur du triangle**, Reference au-dessus de
+Value, decales verticalement de 1,1 a 1,3 mm, sans `justify` (centre par
+defaut, meme regle que le rectangle). Prealable identique : `hide_pin_names`
+d'abord, sinon les noms de broches internes se superposent au texte.
+
+**Il n'y a pas de formule unique** — la position horizontale sure depend de ce
+qui est dessine au centre du triangle :
+
+- **Comparateur/ampli-op simple** (2 entrees a gauche empilees, sortie a
+  droite, rien au milieu que la bulle de sortie) : centrer sur l'origine du
+  symbole, `x = origine_x`. Verifier que les numeros de broches d'entree (a
+  la base) ne debordent pas dans le texte — si c'est le cas, decaler
+  legerement vers la sortie plutot que vers la base : les numeros de broche
+  empietent davantage sur le texte que la bulle de sortie, plus petite.
+- **Porte logique avec pictogramme central** (Schmitt trigger, bascule...) :
+  le pictogramme occupe le centre. Reduire la police a 0,85-1,0 mm et se
+  caler dans le **tiers base** du triangle (`x = origine_x - 5` a `- 6` pour
+  un triangle de ~15 mm de large), avant le pictogramme mais apres les
+  numeros de broche d'entree — quitte a raccourcir la Value si le nom du
+  boitier est long (ex. reporter la reference complete en note a cote plutot
+  que dans le champ, cf. "Repere complementaire" plus bas).
+
+Toujours **verifier par rendu zoome** apres coup : la largeur disponible a une
+abscisse donnee depend de la geometrie exacte du symbole (position des
+broches, presence d'un pictogramme), pas d'une formule generale — contrairement
+au rectangle, dont le centre est toujours libre une fois les noms de broches
+masques.
+
 ### Resistances
 
 **Valeur au centre du corps, repere sur la ligne au-dessus**, les deux suivant
@@ -213,6 +282,23 @@ d'ou des decalages differents selon l'orientation.
 Le cas vertical **exige** les `justify` : sans eux le texte est centre sur son
 ancrage et traverse le fil. Le cas horizontal les refuse, la separation se
 faisant par la hauteur.
+
+### Repere complementaire (puissance, tolerance, fonction)
+
+Quand la grandeur electrique seule ne suffit pas (ex. "10R 2W (snubber)"),
+**ne pas allonger le champ Value** — une valeur longue casse la formule de
+positionnement du type de composant (elle ne tient plus dans le corps, ni
+dans le decalage prevu par la regle) et redevient tot ou tard une source de
+chevauchement des qu'un voisin est ajoute.
+
+Garder Value courte — juste la grandeur electrique lisible dans/pres du
+corps (`10R`) — et ajouter le reste comme une **propriete separee** via
+`set_schematic_component_property` (ou `edit_schematic_component` +
+`properties`), affichee explicitement (`hide: false`, `x`/`y` donnes) **du
+cote oppose au Reference**, decalee plus loin du corps (en dessous, ou au-dela
+du Reference/Value selon la place disponible). Elle se distingue ainsi
+visuellement de la valeur (couleur de propriete differente par defaut dans
+KiCad) sans etre confondue avec elle.
 
 ### Cas general
 
@@ -319,6 +405,16 @@ Un `lib_symbol_mismatch` sur une bibliotheque locale au projet est cosmetique :
 si un diff du symbole montre qu'il est semantiquement identique, ne pas
 poursuivre.
 
+**En convertissant des `global_label` en `label`** (directive 6), le nom de
+net exporte par `kicad-cli` change de forme : un net qui ne repose plus que
+sur des `label` locaux — ou sur un fil sans etiquette du tout — ressort
+prefixe d'un `/` (chemin de feuille), la ou un `global_label` donnait le nom
+nu. Le diff plus haut le signale a tort comme une difference. Retirer le `/`
+en tete avant de comparer (`n.get('name').lstrip('/')`), et comparer par
+**ensemble de noeuds** (`{ref.pin, ...}`) plutot que par nom de net quand une
+etiquette a ete supprimee au profit d'un fil direct (directive 4) : le net
+devient alors anonyme (`Net-(REF-PIN)`) sans que la connectivite ait change.
+
 ### 3. Rendu visuel zoome - non negociable
 
 C'est le seul controle qui voit un `justify` faux. Verifier au moins un cas de
@@ -357,3 +453,7 @@ corriger les ecarts inferieurs a 0,5 mm).
 Exemple recent applique de bout en bout, y compris les pieges d'etiquettes :
 `C:\Users\josel\hobby_w\cricri\IC202_frequency_meter\kicad\` (voir la section
 "Regles de lisibilite appliquees" de son README).
+
+Exemple d'application de la directive 6 (labels locaux, projet une page) et
+des symboles triangulaires (comparateurs LM393 + trigger de Schmitt) :
+`C:\Users\josel\hobby_w\Batteries\chargeur_pb\desulfateur\kicad\desulfateur.kicad_sch`.
